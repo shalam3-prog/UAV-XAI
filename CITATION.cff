@@ -1,0 +1,13 @@
+
+cff-version: 1.2.0
+message: "If you use UAV-XAI-Forensics in your research, please cite this software."
+title: "UAV-XAI-Forensics: An Open-Source Framework for Explainable UAV Network Intrusion Detection and Feature Analysis"
+type: software
+authors:
+  - family-names: "Alam"
+    given-names: "Shahid"
+version: 1.0.0
+date-released: 2026-11-22
+url: "https://github.com/shalam3-prog/UAV-XAI"
+repository-code: "https://github.com/shalam3-prog/UAV-XAI"
+license: MIT
