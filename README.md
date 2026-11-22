@@ -27,7 +27,13 @@ The dataset used in the paper is generated from the **ISOT Drone 2024** dataset 
 Execute the main analytical and explanatory pipeline using the following command:
 
 ```bash
-python UAV-XAI.py
+UAV-XAI.py [-h] [-stratify] [-temporal] [-isot-2024]
+
+options:
+  -h, --help  show this help message and exit
+  -stratify   ; Set if you want to stratify the split by class labels. Only set one of them (stratify or temporal)
+  -temporal   ; Set if you want to split based on temporal order. Only set one of them (stratify or temporal)
+  -isot-2024  ; Set if using the ISOT Drone 2024 dataset, otherwise by default it uses the UAVIDS-2025 dataset
 ```
 
 ---
