@@ -27,7 +27,7 @@ The dataset used in the paper is generated from the **ISOT Drone 2024** dataset 
 Execute the main analytical and explanatory pipeline using the following command:
 
 ```bash
-UAV-XAI.py [-h] [-stratify] [-temporal] [-isot-2024]
+python UAV-XAI.py [-h] [-stratify] [-temporal] [-isot-2024]
 
 options:
   -h, --help  show this help message and exit
