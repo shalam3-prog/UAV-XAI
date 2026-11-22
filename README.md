@@ -38,6 +38,17 @@ options:
 
 ---
 
+## 📦 Installation
+
+1. Clone the repository and navigate to the project folder.
+2. Install the required dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
 ## 📉 Generated Outputs
 
 Running the pipeline populates your directory with the following metric logs, data subsets, and evaluation visualizations:
