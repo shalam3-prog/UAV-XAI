@@ -16,8 +16,9 @@ More details on the methodology and experimental evaluation are available in the
 
 The dataset used in the paper is generated from the **ISOT Drone 2024** dataset available at the https://onlineacademiccommunity.uvic.ca/isot/2024/12/05/drone-datasets.
 
-*   **Kaggle Benchmark Dataset Link**: https://www.kaggle.com/datasets/shalam3/isot-drone-master-dataset
-*   **Important Note**: The name of the dataset file (`isot_drone_master_dataset.csv`) is **hard-coded** directly inside the script. Please ensure this file is downloaded and placed in your working directory prior to running the pipeline.
+*   **Kaggle Benchmark Dataset ISOT Drone 2024 Link**: https://www.kaggle.com/datasets/shalam3/isot-drone-master-dataset
+*   **Kaggle Benchmark Dataset UAV-IDS 2025 Link**: https://www.kaggle.com/datasets/qinglizeng1997/uavids-2025
+*   **Important Note**: The name of the dataset files (`isot_drone_master_dataset.csv` and `UAVIDS-2025.csv`) are **hard-coded** directly inside the script. Please ensure these files are downloaded and placed in your working directory prior to running the pipeline.
 
 ---
 
