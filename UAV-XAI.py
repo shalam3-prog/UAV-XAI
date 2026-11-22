@@ -28,6 +28,7 @@ import pickle
 import psutil
 from sklearn.metrics import matthews_corrcoef
 from scipy.stats import spearmanr
+from lime import lime_tabular
 
 __RANDOM_STRATIFIED_SPLIT__ = True  # Set to True if you want to stratify the split by class labels
 __TEMPORAL_SPLIT__ = False          # Set to True if you want to split based on temporal order (e.g., timestamps)
@@ -38,7 +39,7 @@ __ISOT_DRONE_2024__ = True          # Set to True if using the ISOT Drone Datase
 # =====================================================================
 #dataset_root = "./ISOT-Drone-Dataset"  # Root directory containing subfolders for each drone network class
 if __ISOT_DRONE_2024__ == True:
-    master_output_file = "./isot_drone_master_dataset_small.csv"
+    master_output_file = "./isot_drone_master_dataset.csv"
 else:
     master_output_file = "./UAVIDS-2025.csv"
 if not os.path.exists(master_output_file):
@@ -104,13 +105,13 @@ def mac_to_float(mac_address):
 master_df = pd.read_csv(master_output_file)
 # For the dataset UAVIDS-2025
 if __ISOT_DRONE_2024__ == False:
+	master_df = master_df.rename(columns={"label": "Class"})
 	if 'SrcAddr' in master_df.columns:
 		master_df['SrcAddr'] = master_df['SrcAddr'].apply(ip_to_int)
 	if 'DstAddr' in master_df.columns:
 		master_df['DstAddr'] = master_df['DstAddr'].apply(ip_to_int)
 	if 'Protocol' in master_df.columns:
 		master_df['Protocol'] = master_df['Protocol'].apply(protocol_to_int)
-#		# Remove the columns and save the result into a new or same DataFrame
 #		master_df = master_df.drop(columns=["SrcAddr", "DstAddr", "FlowID", "SrcPort", "DstPort"], errors='ignore')
 
 print(f"Working Dataset Shape: {master_df.shape}")
@@ -177,9 +178,9 @@ if __RANDOM_STRATIFIED_SPLIT__ == True:
 	y_test = test_df['Class']
 
 	# KEEP THE COLUMNS FOR XAI INTEGRITY BUT BLIND THE MODEL BY ZEROING VALUES
-	X_train['ts'] = 0.0; X_test['ts'] = 0.0
-	X_train['Drone_port'] = 0.0; X_test['Drone_port'] = 0.0
-	print("Successfully blinded 'ts' and 'Drone_port' feature matrices to prevent cheating.")
+	if __ISOT_DRONE_2024__ == True:
+		X_train['ts'] = 0.0; X_test['ts'] = 0.0
+		print("Successfully blinded 'ts' feature matrix to prevent cheating.")
 
 	# Standardize remaining features
 	scaler = StandardScaler()
@@ -443,15 +444,10 @@ with open("drone_security_results.txt", "w", encoding="utf-8") as f:
 	f.write("\n".join(log_output))
 print("\n[Complete] Data processing, training, visual plots, and text metrics logs saved successfully.")
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np
-import pandas as pd
-
 def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="per_class_xai_comparison.pdf"):
 	print("\nProcessing multi-class XAI matrix chart...")
 	
-	# 1. Gather all feature importances across all 10 sub-estimators
+	# 1. Gather all feature importances across all sub-estimators
 	importance_data = {}
 	for idx, class_label in enumerate(class_names):
 		sub_estimator = ovr_model.estimators_[idx]
@@ -478,7 +474,7 @@ def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="
 	matrix_df['Max_Impact'] = matrix_df.max(axis=1)
 	top_features = matrix_df.sort_values(by='Max_Impact', ascending=False).head(5).index.tolist()
 	
-	# Filter matrix to only showcase the top 5 features across all 10 classes
+	# Filter matrix to only showcase the top 5 features across all classes
 	plot_df = matrix_df.loc[top_features].drop(columns=['Max_Impact'])
 	
 	# Transform data from Wide to Long format for Seaborn compatibility
@@ -500,7 +496,7 @@ def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="
 	)
 	
 	# 5. Format layout styling
-	plt.title('Explainable AI (XAI): Top Network Features Breakdown Across All 10 Classes', fontsize=14, fontweight='bold', pad=20)
+	plt.title('Explainable AI (XAI): Top Network Features Breakdown Across All Classes', fontsize=14, fontweight='bold', pad=20)
 	plt.xlabel('Extracted Network Traffic Feature Name', fontsize=12, fontweight='bold', labelpad=12)
 	plt.ylabel('Feature Contribution (Gini Importance Score)', fontsize=12, fontweight='bold')
 	
@@ -619,20 +615,10 @@ def compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, feat
     # 5. Append clean output text to your central log file
     with open("drone_security_results.txt", "a", encoding="utf-8") as f:
         f.write("\n\n" + "\n".join(comparison_logs))
-    print(f"\n[Success] All 10 side-by-side per-class verification charts saved safely.")
+    print(f"\n[Success] All side-by-side per-class verification charts saved safely.")
 
 # Execute Phase 5 safely using the patched function
 compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, X.columns, class_names)
-
-import shap
-import pandas as pd
-import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import spearmanr
-from lime import lime_tabular
 
 def evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scaled, y_train, y_test, feature_names, class_names, K=5):
     print("\n" + "="*60)
@@ -775,11 +761,6 @@ else:
 
 # Now call the function securely using the defined variable
 evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scaled, y_train, y_test, feature_names, class_names, K=5)
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from lime import lime_tabular
 
 def batch_export_stratified_lime_pdfs(rf_model, X_train_scaled, X_test_scaled, y_test, feature_names, class_names, samples_per_status=2, seed=42):
     print("\n" + "="*60)
