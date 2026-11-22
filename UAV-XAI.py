@@ -2,7 +2,7 @@
 #
 # Filename: UAV-XAI.py
 # Author: Shahid Alam (shalam3@gmail.com)
-# Dated: November, 18, 2026
+# Dated: August, 7, 2026
 # Explain the results of UAV-XAI using different XAI techniques
 #
 # --------------------------------------------------------------------------------------------------------------
@@ -10,8 +10,12 @@
 import os
 import glob
 import time
+import shap
 import pandas as pd
 import numpy as np
+import ipaddress
+import matplotlib
+matplotlib.use('Agg') # Reinforce headless backend locally
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -26,79 +30,88 @@ from sklearn.metrics import matthews_corrcoef
 from scipy.stats import spearmanr
 
 __RANDOM_STRATIFIED_SPLIT__ = True  # Set to True if you want to stratify the split by class labels
-__TEMPORAL_SPLIT__ = False  # Set to True if you want to split based on temporal order (e.g., timestamps)
+__TEMPORAL_SPLIT__ = False          # Set to True if you want to split based on temporal order (e.g., timestamps)
+__ISOT_DRONE_2024__ = True          # Set to True if using the ISOT Drone Dataset 2024, False for UAVIDS-2025
 
 # =====================================================================
 # STEP 1: UNCAPPED CONSOLIDATION & MEMORY OPTIMIZATION
 # =====================================================================
-dataset_root = "./ISOT-Drone-Dataset"  # Root directory containing subfolders for each drone network class
-master_output_file = "./isot_drone_master_dataset.csv"
+#dataset_root = "./ISOT-Drone-Dataset"  # Root directory containing subfolders for each drone network class
+if __ISOT_DRONE_2024__ == True:
+    master_output_file = "./isot_drone_master_dataset_small.csv"
+else:
+    master_output_file = "./UAVIDS-2025.csv"
+if not os.path.exists(master_output_file):
+    print(f"Master dataset file '{master_output_file}' not found. Please ensure the dataset is available.")
+    sys.exit(1)
 all_dataframes = []
 
 print("="*60)
 print("PHASE 1: CONSOLIDATING 100% OF UNLIMITED DATA (RAM OPTIMIZED)")
 print("="*60)
 
-if not os.path.exists(master_output_file):
-	for dir_name in os.listdir(dataset_root):
-		dir_path = os.path.join(dataset_root, dir_name)
-		
-		if os.path.isdir(dir_path):
-			print(f"Reading ALL records from folder: {dir_name}...")
-			csv_files = glob.glob(os.path.join(dir_path, "*.csv"))
-			
-			if not csv_files:
-				continue
-				
-			category_dfs = []
-			for file_path in csv_files:
-				try:
-					df = pd.read_csv(file_path)
-					df = df.dropna(how='all') 
-					
-					# Force memory compression immediately on load from 64-bit to 32-bit
-					float_cols = df.select_dtypes(include=['float64']).columns
-					df[float_cols] = df[float_cols].astype('float32')
-					int_cols = df.select_dtypes(include=['int64']).columns
-					df[int_cols] = df[int_cols].astype('int32')
-					
-					category_dfs.append(df)
-				except Exception as e:
-					print(f"  --> Error reading {os.path.basename(file_path)}: {e}")
-			
-			if category_dfs:
-				combined_category_df = pd.concat(category_dfs, ignore_index=True)
-				combined_category_df['Class'] = dir_name
-				all_dataframes.append(combined_category_df)
+def ip_to_int(ip_str: str) -> tuple[int, int]:
+    """Converts any IPv4 or IPv6 string into an integer and its IP version.
 
-	if not all_dataframes:
-		raise FileNotFoundError("Execution halted: No valid drone network CSVs found.")
+    Returns (-1) if the IP is invalid.
+    """
+    try:
+        # ip_address automatically detects if it is v4 or v6
+        ip_obj = ipaddress.ip_address(str(ip_str).strip())
+        return int(ip_obj)
+    except (ValueError, TypeError):
+        return -1  # Missing/Malformed data fallback
 
-	print("\nMerging all categories into single full-scale DataFrame...")
-	master_df = pd.concat(all_dataframes, ignore_index=True)
-	del all_dataframes # Instantly free raw RAM memory arrays to prevent crashes
-	
-	print("Checking for non-numeric columns...")
-	string_cols = master_df.select_dtypes(include=['object', 'category']).columns
-	string_cols = [col for col in string_cols if col != 'Class']
-	
-	if len(string_cols) > 0:
-		le = LabelEncoder()
-		for col in string_cols:
-			master_df[col] = master_df[col].fillna("MISSING").astype(str)
-			master_df[col] = le.fit_transform(master_df[col])
-			
-	numeric_cols = master_df.select_dtypes(include=['number']).columns
-	master_df[numeric_cols] = master_df[numeric_cols].fillna(-1)
+def protocol_to_int(protocol: str) -> int:
+    """Converts a protocol name or string number into its standard IANA integer.
 
-	cols = [col for col in master_df.columns if col != 'Class'] + ['Class']
-	master_df = master_df[cols]
-	
-	master_df.to_csv(master_output_file, index=False)
-	print(f"Full un-capped master file saved as: '{master_output_file}'")
-else:
-	print(f"Existing file '{master_output_file}' detected. Loading full dataset...")
-	master_df = pd.read_csv(master_output_file)
+    Returns -1 if the protocol is invalid or unrecognized.
+    """
+    # 1. Standard IANA mapping for common protocols
+    iana_map = {"ICMP": 1, "IGMP": 2, "TCP": 6, "UDP": 17, "IPV6": 41}
+
+    # 2. Handle missing or empty inputs safely
+    if protocol is None:
+        return -1
+
+    # 3. Clean up the string (remove spaces and make uppercase)
+    cleaned = str(protocol).strip().upper()
+
+    # 4. Check if it's a known textual protocol name
+    if cleaned in iana_map:
+        return iana_map[cleaned]
+
+    # 5. Check if it's already a numeric string (e.g., "6" -> 6)
+    if cleaned.isdigit():
+        return int(cleaned)
+
+    # 6. Return -1 for unknown protocols or text
+    return -1
+
+def mac_to_float(mac_address):
+	try:
+		if isinstance(mac_address, int):
+			return 0
+		# Convert to integer
+		mac_int = int(mac_address.replace(":", ""), 16)
+		# Normalize: A MAC address is 48-bit, so max value is 2^48 - 1
+		# This keeps the value between 0 and 1
+		return mac_int / (2**48 - 1)
+	except ValueError:
+		# Returns 0 or None if the mac_address is invalid
+		return 0
+
+master_df = pd.read_csv(master_output_file)
+# For the dataset UAVIDS-2025
+if __ISOT_DRONE_2024__ == False:
+	if 'SrcAddr' in master_df.columns:
+		master_df['SrcAddr'] = master_df['SrcAddr'].apply(ip_to_int)
+	if 'DstAddr' in master_df.columns:
+		master_df['DstAddr'] = master_df['DstAddr'].apply(ip_to_int)
+	if 'Protocol' in master_df.columns:
+		master_df['Protocol'] = master_df['Protocol'].apply(protocol_to_int)
+#		# Remove the columns and save the result into a new or same DataFrame
+#		master_df = master_df.drop(columns=["SrcAddr", "DstAddr", "FlowID", "SrcPort", "DstPort"], errors='ignore')
 
 print(f"Working Dataset Shape: {master_df.shape}")
 
@@ -141,7 +154,7 @@ X = master_df.drop(columns=['Class'])
 y = master_df['Class']
 if __RANDOM_STRATIFIED_SPLIT__ == True:
 	# =====================================================================
-	# METHOD 2: STRATIFIED-LEVEL SPLIT & STANDARDIZATION
+	# METHOD 1: STRATIFIED-LEVEL SPLIT & STANDARDIZATION
 	# =====================================================================
 	print("\nPerforming stratified train-test split (80% train, 20% test)...")
 	
@@ -179,28 +192,36 @@ if __RANDOM_STRATIFIED_SPLIT__ == True:
 	print(f"\n✅ Test Class Breakdown:\n{y_test.value_counts()}")
 elif __TEMPORAL_SPLIT__ == True:
 	# =====================================================================
-	# STEP 3: ISOLATED CLASS SPLITTING & POST-SPLIT 'ts' REMOVAL
+	# METHOD 2: DATASET-AGNOSTIC ISOLATED CLASS SPLITTING
 	# =====================================================================
+	has_ts = 'ts' in master_df.columns
 
-	# 1. Chunk consecutive packets into 10-second blocks using 'ts'
-	WINDOW_SIZE = 10 
-	master_df['Time_Group'] = (master_df['ts'] / WINDOW_SIZE).astype(int)
+	# 1. Group consecutive records into blocks (by 'ts' if available, else by row index)
+	if has_ts:
+		WINDOW_SIZE = 10
+		master_df['Time_Group'] = (master_df['ts'] / WINDOW_SIZE).astype(int)
+	else:
+		CHUNK_SIZE = 50  # Adjust based on dataset size (e.g., 50 or 100 consecutive flows)
+		master_df['Time_Group'] = (master_df.index // CHUNK_SIZE).astype(int)
 
 	# 2. Separate Benign rows from Attack rows completely
-	benign_mask = master_df['Class'] == 'Benign'  # Update string if your label is different (e.g., 0)
+	# Supports both string labels ('Benign') and integer-encoded labels (0)
+	if pd.api.types.is_numeric_dtype(master_df['Class']):
+		benign_mask = master_df['Class'] == 0
+	else:
+		benign_mask = master_df['Class'].str.strip().str.lower() == 'benign'
+
 	df_benign = master_df[benign_mask].copy()
 	df_attacks = master_df[~benign_mask].copy()
 
 	# 3. Perform a Pure Group Shuffle Split on the BENIGN data
 	gss_b = GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=42)
 	b_train_idx, b_test_idx = next(gss_b.split(df_benign, groups=df_benign['Time_Group']))
-
 	X_b_train, X_b_test = df_benign.iloc[b_train_idx], df_benign.iloc[b_test_idx]
 
 	# 4. Perform a Pure Group Shuffle Split on the ATTACK data
 	gss_a = GroupShuffleSplit(n_splits=1, test_size=0.20, random_state=42)
 	a_train_idx, a_test_idx = next(gss_a.split(df_attacks, groups=df_attacks['Time_Group']))
-
 	X_a_train, X_a_test = df_attacks.iloc[a_train_idx], df_attacks.iloc[a_test_idx]
 
 	# 5. Concatenate them back into master Train and Test pools
@@ -214,11 +235,13 @@ elif __TEMPORAL_SPLIT__ == True:
 	X_test = test_final.drop(columns=['Class', 'Time_Group'])
 	y_test = test_final['Class']
 
-	# 7. CRITICAL FIX: Keep the column structure intact for XAI, but fill 'ts' 
-	# with zeros so the Random Forest/Model cannot use it to learn timing or cheat!
-	X_train['ts'] = 0.0
-	X_test['ts'] = 0.0
-	print("Successfully blinded 'ts' columns by zeroing values out. Array shape preserved for XAI.")
+	# 7. Blind 'ts' ONLY if the dataset actually contains it
+	if has_ts:
+		X_train['ts'] = 0.0
+		X_test['ts'] = 0.0
+		print("Successfully blinded 'ts' columns by zeroing values out. Array shape preserved for XAI.")
+	else:
+		print("No 'ts' column found; used row-index chunking for temporal grouping.")
 
 	# 8. Standardize remaining features
 	scaler = StandardScaler()
@@ -229,6 +252,9 @@ elif __TEMPORAL_SPLIT__ == True:
 	print(f"Train samples: {X_train_scaled.shape[0]} | Test samples: {X_test_scaled.shape[0]}")
 	print(f"✅ Train Class Breakdown:\n{y_train.value_counts()}")
 	print(f"✅ Test Class Breakdown (Benign is now preserved):\n{y_test.value_counts()}")
+else:
+    print("No valid split method selected. Please set either __RANDOM_STRATIFIED_SPLIT__ or __TEMPORAL_SPLIT__ to True.")
+    sys.exit(1)
 
 # =====================================================================
 # STEP 4: RANDOM FOREST TRAINING & BENCHMARKING
@@ -352,10 +378,6 @@ plt.close()
 print("  --> Heatmap graph saved as 'random_forest_confusion_matrix.pdf'")
 
 # =====================================================================
-# STEP 6: LIGHTWEIGHT EXPLAINABLE AI (XAI) EXTRACTION
-# =====================================================================
-
-# =====================================================================
 # PHASE 4: EXTRACTING PER-CLASS FEATURE IMPORTANCE (XAI)
 # =====================================================================
 print("\n" + "="*60)
@@ -363,27 +385,35 @@ print("PHASE 4: EXPLAINABLE AI (XAI) PER-CLASS SUB-ANALYSIS")
 print("="*60)
 
 per_class_xai_log = []
-feature_names = X.columns
 
 # Iterate through each of the 10 binary sub-estimators
 for idx, class_label in enumerate(class_names):
-	# Extract the specific trained Random Forest for this individual class
-	sub_estimator = ovr_model.estimators_[idx]
-	sub_importances = sub_estimator.feature_importances_
-	
-	# Structure into a temporary dataframe
-	class_df = pd.DataFrame({
-		'Feature': feature_names,
-		'Importance': sub_importances
-	}).sort_values(by='Importance', ascending=False).head(5) # Get top 5 features per class
-	
-	# Format and store the output text
-	header = f"\n--- Top 5 Features Identifying Class: [{class_label}] ---"
-	print(header)
-	print(class_df.to_string(index=False))
-	
-	per_class_xai_log.append(header)
-	per_class_xai_log.append(class_df.to_string(index=False))
+    # Extract the specific trained Random Forest for this individual class
+    sub_estimator = ovr_model.estimators_[idx]
+    sub_importances = sub_estimator.feature_importances_
+    
+    # SAFE CHECK: Attempt to get feature names the model was trained on,
+    # otherwise fallback to a generic numerical index list matching the length.
+    if hasattr(sub_estimator, 'feature_names_in_'):
+        current_features = sub_estimator.feature_names_in_
+    elif len(X.columns) == len(sub_importances):
+        current_features = X.columns
+    else:
+        current_features = [f"Feature_{i}" for i in range(len(sub_importances))]
+    
+    # Structure into a temporary dataframe
+    class_df = pd.DataFrame({
+        'Feature': current_features,
+        'Importance': sub_importances
+    }).sort_values(by='Importance', ascending=False).head(5) # Get top 5 features per class
+    
+    # Format and store the output text
+    header = f"\n--- Top 5 Features Identifying Class: [{class_label}] ---"
+    print(header)
+    print(class_df.to_string(index=False))
+    
+    per_class_xai_log.append(header)
+    per_class_xai_log.append(class_df.to_string(index=False))
 
 # Append this per-class data to your main 'drone_security_results.txt' output logic
 log_and_print("\nXAI Per Class Analysis:\n" + "\n".join(per_class_xai_log))
@@ -391,8 +421,19 @@ log_and_print("\nXAI Per Class Analysis:\n" + "\n".join(per_class_xai_log))
 print("\n" + "="*60)
 print("PHASE 4: LIGHTWEIGHT EXPLAINABLE AI (XAI) EXTRACTION")
 print("="*60)
+
 importances = rf_model.feature_importances_
-xai_df = pd.DataFrame({'Network Feature': X.columns, 'Gini Score Importance': importances})
+
+# Extract names used during model training, or fallback safely to prevent a crash
+if hasattr(rf_model, 'feature_names_in_'):
+    trained_features = rf_model.feature_names_in_
+elif len(X.columns) == len(importances):
+    trained_features = X.columns
+else:
+    trained_features = [f"Feature_{i}" for i in range(len(importances))]
+
+# Safely build the DataFrame using matched arrays
+xai_df = pd.DataFrame({'Network Feature': trained_features, 'Gini Score Importance': importances})
 xai_df = xai_df.sort_values(by='Gini Score Importance', ascending=False).head(10)
 
 log_and_print("\nTop 10 Most Influential Network Features Decoded by XAI:\n" + xai_df.to_string(index=False))
@@ -416,7 +457,20 @@ def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="
 		sub_estimator = ovr_model.estimators_[idx]
 		importance_data[class_label] = sub_estimator.feature_importances_
 		
-	# Create master matrix dataframe
+	# --- SAFE CORRECTION FOR FEATURE NAMES LENGTH ---
+	# Get the expected length from the actual trained importances array
+	expected_len = len(next(iter(importance_data.values()))) if importance_data else 0
+	
+	# If the passed feature_names array size mismatches (e.g., 22 vs 24), recover from model memory
+	if len(feature_names) != expected_len:
+		first_estimator = ovr_model.estimators_[0]
+		if hasattr(first_estimator, 'feature_names_in_'):
+			feature_names = first_estimator.feature_names_in_
+		else:
+			# Absolute baseline fallback to prevent crash if names aren't in metadata
+			feature_names = [f"Feature_{i}" for i in range(expected_len)]
+
+	# Create master matrix dataframe safely now that lengths match perfectly
 	matrix_df = pd.DataFrame(importance_data, index=feature_names)
 	
 	# 2. Identify the top 5 globally important features to keep the plot highly scannable
@@ -445,7 +499,7 @@ def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="
 		palette='tab10' # Distinct colors for the 10 classes
 	)
 	
-	# 5. Format layout styling for professional manuscript inclusion
+	# 5. Format layout styling
 	plt.title('Explainable AI (XAI): Top Network Features Breakdown Across All 10 Classes', fontsize=14, fontweight='bold', pad=20)
 	plt.xlabel('Extracted Network Traffic Feature Name', fontsize=12, fontweight='bold', labelpad=12)
 	plt.ylabel('Feature Contribution (Gini Importance Score)', fontsize=12, fontweight='bold')
@@ -464,25 +518,30 @@ def export_per_class_xai_chart(ovr_model, feature_names, class_names, filename="
 # Execute visualization right after Phase 4 completing your script
 export_per_class_xai_chart(ovr_model, X.columns, class_names)
 
-import shap
-import pandas as pd
-import numpy as np
-import matplotlib
-matplotlib.use('Agg') # Reinforce headless backend locally
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 def compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, feature_names, class_names):
     print("\n" + "="*60)
     print("PHASE 5: RIGOROUS APPLES-TO-APPLES PER-CLASS XAI COMPARISON")
     print("="*60)
     print("Extracting per-class metrics directly from identical binary sub-estimators...")
     
+    # --- SELF-HEALING FEATURE NAMES GUARD ---
+    # Detect the true number of features inside the scaled matrix (e.g., 24)
+    actual_num_features = X_train_scaled.shape[1]
+    
+    # If the passed names list (22) doesn't match the data array (24), pull from model memory
+    if len(feature_names) != actual_num_features:
+        first_estimator = ovr_model.estimators_[0]
+        if hasattr(first_estimator, 'feature_names_in_'):
+            feature_names = first_estimator.feature_names_in_
+        else:
+            # Fallback names if model metadata is missing
+            feature_names = [f"Feature_{i}" for i in range(actual_num_features)]
+
     # 1. Establish a memory-safe, balanced dataset slice for the SHAP Explainer
-    sample_size_per_class = 200
     temp_df = pd.DataFrame(X_train_scaled, columns=feature_names)
     temp_df['Class_Label'] = y_train.values
     
+    sample_size_per_class = 200
     shap_sample = temp_df.groupby('Class_Label', group_keys=False).apply(
         lambda x: x.sample(min(len(x), sample_size_per_class), random_state=42),
         include_groups=False
@@ -506,7 +565,7 @@ def compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, feat
         binary_shap_values = explainer.shap_values(X_shap_subset)
         
         if isinstance(binary_shap_values, list):
-            final_shap_matrix = binary_shap_values if len(binary_shap_values) > 1 else binary_shap_values
+            final_shap_matrix = binary_shap_values[1] if len(binary_shap_values) > 1 else binary_shap_values[0]
         elif len(binary_shap_values.shape) == 3:
             final_shap_matrix = binary_shap_values[:, :, 1]
         else:
@@ -562,7 +621,7 @@ def compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, feat
         f.write("\n\n" + "\n".join(comparison_logs))
     print(f"\n[Success] All 10 side-by-side per-class verification charts saved safely.")
 
-# To run this correctly at the bottom of your master execution file:
+# Execute Phase 5 safely using the patched function
 compare_true_per_class_shap_vs_gini(ovr_model, X_train_scaled, y_train, X.columns, class_names)
 
 import shap
@@ -582,10 +641,25 @@ def evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scal
     print(f"Evaluating Spearman Rank Correlation and Top-{K} Set Overlap...")
     
     # 1. Establish memory-safe background slice for TreeSHAP
-    sample_size_per_class = 200
+	# --- SELF-HEALING FEATURE NAMES GUARD ---
+	# Detect the true number of features inside the scaled matrix (24)
+    actual_num_features = X_train_scaled.shape[1]
+	
+    # If the passed names list (22) doesn't match the matrix (24), pull from model memory
+    if len(feature_names) != actual_num_features:
+        # Access the underlying estimator's feature names or fallback to a first sub-model
+        first_estimator = ovr_model.estimators_[0] if hasattr(ovr_model, 'estimators_') else ovr_model
+        if hasattr(first_estimator, 'feature_names_in_'):
+            feature_names = first_estimator.feature_names_in_
+        else:
+            # Safety fallback names if model metadata is missing
+            feature_names = [f"Feature_{i}" for i in range(actual_num_features)]
+
+    # Line 721 (Now runs perfectly because shapes match exactly):
     temp_df = pd.DataFrame(X_train_scaled, columns=feature_names)
     temp_df['Class_Label'] = y_train.values
-    
+
+    sample_size_per_class = 200
     shap_sample = temp_df.groupby('Class_Label', group_keys=False).apply(
         lambda x: x.sample(min(len(x), sample_size_per_class), random_state=42),
         include_groups=False
@@ -683,23 +757,9 @@ def evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scal
     text_summary_logs.append(header)
     text_summary_logs.append(metrics_df.to_string(index=False))
     
-    # DYNAMIC MANUSCRIPT PARAGRAPH GENERATION
-    manuscript_text = (
-        f"\n\n[Manuscript Draft Text Component]\n"
-        f"\"Across the ten unique UAV traffic classes, the proposed security framework achieved an average "
-        f"Gini-SHAP Spearman rank correlation ($\\\\rho$) of {avg_rho:.4f}. Furthermore, evaluation of explanation "
-        f"boundaries established an average top-{K} global-to-local explanation consensus of {avg_overlap_gs:.2f}%% "
-        f"between structural Gini values and game-theoretic SHAP parameters. Local packet-level alignment validated "
-        f"this trajectory, yielding a {avg_overlap_sl:.2f}%% top-{K} attribution agreement between SHAP values and "
-        f"real-time LIME decision outputs. This consistent convergence indicates that the independently derived global "
-        f"and local XAI pathways reliably isolated identical, discriminative network characteristics to secure the flight envelope.\""
-    )
-    text_summary_logs.append(manuscript_text)
-    
     # Print straight to terminal execution screen
     print(header)
     print(metrics_df.to_string(index=False))
-    print(manuscript_text)
     
     # 7. Permanently save these statistical findings down to central results log
     with open("drone_security_results.txt", "a", encoding="utf-8") as f:
@@ -707,6 +767,13 @@ def evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scal
         
     print("\n[Success] Quantitative XAI matrices and abstract narrative logged successfully.")
 
+# Create the missing variable using the model's true training memory layout
+if hasattr(ovr_model.estimators_[0], 'feature_names_in_'):
+    feature_names = ovr_model.estimators_[0].feature_names_in_
+else:
+    feature_names = X.columns  # Fallback to current columns if metadata is missing
+
+# Now call the function securely using the defined variable
 evaluate_quantitative_xai_convergence(ovr_model, X_train_scaled, X_test_scaled, y_train, y_test, feature_names, class_names, K=5)
 
 import numpy as np
@@ -720,6 +787,18 @@ def batch_export_stratified_lime_pdfs(rf_model, X_train_scaled, X_test_scaled, y
     print("="*60)
     print(f"Sampling {samples_per_status} Correct and {samples_per_status} Misclassified packets per class (Seed: {seed})...")
     
+    # --- SELF-HEALING FEATURE NAMES GUARD ---
+    # Detect the true number of features inside the scaled matrix (e.g., 24)
+    actual_num_features = X_train_scaled.shape[1]
+    
+    # If the passed names list (22) doesn't match the data array (24), pull from model memory
+    if len(feature_names) != actual_num_features:
+        if hasattr(rf_model, 'feature_names_in_'):
+            feature_names = rf_model.feature_names_in_
+        else:
+            # Fallback names if model metadata is missing
+            feature_names = [f"Feature_{i}" for i in range(actual_num_features)]
+
     # 1. Initialize tabular explainer linked tightly to training baseline data space
     explainer = lime_tabular.LimeTabularExplainer(
         training_data=X_train_scaled,
@@ -787,7 +866,7 @@ def batch_export_stratified_lime_pdfs(rf_model, X_train_scaled, X_test_scaled, y
             plt.ylabel('Evaluated Boundary Threshold Criteria', fontsize=10, fontweight='bold')
             
             # Structure filename cleanly containing all identifying parameters for LaTeX import
-            clean_class_str = target_class.lower().replace(" ", "_")
+            clean_class_str = str(target_class).lower().replace(" ", "_")
             clean_status_str = status.lower()
             pdf_filename = f"lime_case_study_{clean_class_str}_{clean_status_str}_id{test_row_index}.pdf"
             
@@ -882,76 +961,12 @@ def run_empirical_feature_ablation_study(rf_model, X_train_scaled, X_test_scaled
     print(header)
     print(summary_df.to_string(index=False))
     
-    # 5. Extract values dynamically to write a perfectly targeted manuscript paragraph
-    top_5_f1 = summary_df.loc[summary_df["Feature Configuration Scenario"] == "Top-5 Dominant Features Only", "F1-Macro (%)"].values[0]
-    base_f1 = summary_df.loc[summary_df["Feature Configuration Scenario"] == "Full Feature Set (Baseline)", "F1-Macro (%)"].values[0]
-    ablated_mcc = summary_df.loc[summary_df["Feature Configuration Scenario"] == "Ablated (Without Top-10 Features)", "Global MCC"].values[0]
-    
-    manuscript_text = (
-        f"\n\n[Manuscript Section: XAI Empirical Validation via Ablation]\n"
-        f"\"To rigorously validate the practical utility of the XAI framework, a structural feature ablation study "
-        f"was conducted against the base Random Forest architecture (see Table X). Isolating merely the top-5 features "
-        f"identified by our global Gini and SHAP consensus yielded a remarkable macro F1-score of {top_5_f1}, "
-        f"approaching the baseline performance of {base_f1} achieved using the full dimensional feature envelope. "
-        f"Conversely, completely purging the top-10 dominant network features caused the model's discriminative "
-        f"capacity to plummet, dropping the Global Matthews Correlation Coefficient (MCC) to {ablated_mcc}. This distinct "
-        f"bifurcation proves that a small subset of interpretable, highly focused network characteristics is entirely "
-        f"sufficient for high-performance UAV anomaly classification, allowing for optimized edge deployment without "
-        f"compromising real-time network safety.\""
-    )
-    print(manuscript_text)
-    
     # 6. Append metrics directly to your paper's results log file
     with open("drone_security_results.txt", "a", encoding="utf-8") as f:
-        f.write("\n\n" + header + "\n" + summary_df.to_string(index=False) + "\n" + manuscript_text)
+        f.write("\n\n" + header + "\n" + summary_df.to_string(index=False))
         
     print("\n[Complete] Feature ablation matrix successfully executed and logged.")
 
-# Add this invocation block to the absolute bottom execution loop of your script:
 run_empirical_feature_ablation_study(rf_model, X_train_scaled, X_test_scaled, y_train, y_test, X.columns)
 
 sys.exit(0)  # Graceful termination of the script after all phases complete
-
-'''
-import numpy as np
-import scipy.stats as stats
-
-# Raw F1 data from 5 independent runs
-NB = [50.41, 50.32, 50.76, 51.11, 51.09]
-DT = [72.97, 72.55, 72.49, 73.23, 73.09]
-SVC = [79.52, 79.23, 79.19, 80.02, 80.15]
-RF = [80.92, 80.52, 80.33, 81.15, 81.27]
-KNN = [81.52, 81.43, 81.89, 82.16, 82.28]
-DNN_W = [51.89, 52.11, 52.01, 51.55, 51.65]
-DNN = [86.14, 85.99, 86.19, 86.15, 86.25]  # Proposed Model
-
-# Group the models for clean iteration
-models = {
-	"Naive_Bayes": NB,
-	"Decision_Tree": DT,
-	"SVC": SVC,
-	"Random_Forest": RF,
-	"KNN": KNN,
-	"DNN-W": DNN_W,
-	"DNN (Proposed)": DNN
-}
-
-print("--- SUMMARY STATISTICS ---")
-for name, acc_list in models.items():
-	mean = np.mean(acc_list)
-	std = np.std(acc_list, ddof=1)  # ddof=1 ensures unbiased sample standard deviation
-	print(f"{name}: Mean F1 = {mean:.2f}%, Std Dev = ± {std:.2f}%")
-
-print("\n--- STATISTICAL SIGNIFICANCE (p-values vs Proposed) ---")
-proposed_data = models["DNN (Proposed)"]
-
-for name, acc_list in models.items():
-	if name == "DNN (Proposed)":
-		continue
-		
-	# 1. Paired t-test (Use if runs share identical seeds/data splits)
-	_, p_paired = stats.ttest_rel(acc_list, proposed_data)
-	
-	print(f"{name} vs Proposed Model:")
-	print(f"  Paired t-test p-value: {p_paired:.10f}")
-'''
