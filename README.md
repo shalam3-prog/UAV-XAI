@@ -38,8 +38,6 @@ Running the pipeline populates your directory with the following metric logs, da
 
 ### Data & Results Summary
 *   `drone_security_results.txt`
-*   `isot_drone_master_dataset.csv`
-*   `isot_drone_master_dataset_small.csv`
 
 ### Base Metrics & Comparisons
 *   `dataset_distribution.pdf`
