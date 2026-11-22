@@ -30,16 +30,38 @@ from sklearn.metrics import matthews_corrcoef
 from scipy.stats import spearmanr
 from lime import lime_tabular
 
+import argparse
+
 __RANDOM_STRATIFIED_SPLIT__ = True  # Set to True if you want to stratify the split by class labels
 __TEMPORAL_SPLIT__ = False          # Set to True if you want to split based on temporal order (e.g., timestamps)
 __ISOT_DRONE_2024__ = True          # Set to True if using the ISOT Drone Dataset 2024, False for UAVIDS-2025
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-stratify", action="store_true")
+parser.add_argument("-temporal", action="store_true")
+parser.add_argument("-isot-2024", action="store_true")
+args = parser.parse_args()
+if args.stratify != None:
+    __RANDOM_STRATIFIED_SPLIT__ = args.stratify
+if args.temporal != None:
+    __TEMPORAL_SPLIT__ = args.temporal
+if args.isot_2024 != None:
+    __ISOT_DRONE_2024__ = args.isot_2024
+
+if __RANDOM_STRATIFIED_SPLIT__ == __TEMPORAL_SPLIT__:
+    print("ERROR: Please select either Stratified Split or Temporal Split, not both.")
+    sys.exit(1)
+
+print(f"Stratified Split: {__RANDOM_STRATIFIED_SPLIT__}")
+print(f"Temporal Split:   {__TEMPORAL_SPLIT__}")
+print(f"ISOT Drone 2024:  {__ISOT_DRONE_2024__}")
 
 # =====================================================================
 # STEP 1: UNCAPPED CONSOLIDATION & MEMORY OPTIMIZATION
 # =====================================================================
 #dataset_root = "./ISOT-Drone-Dataset"  # Root directory containing subfolders for each drone network class
 if __ISOT_DRONE_2024__ == True:
-    master_output_file = "./isot_drone_master_dataset.csv"
+    master_output_file = "./isot_drone_master_dataset_small.csv"
 else:
     master_output_file = "./UAVIDS-2025.csv"
 if not os.path.exists(master_output_file):
