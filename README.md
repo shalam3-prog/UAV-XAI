@@ -1,8 +1,8 @@
-# UAV-XAI-Forensics
+# UAV-XAI
 
-This repository contains the source code and link to the benchmark dataset for **UAV-XAI-Forensics**, a lightweight Random Forest-based UAV network security framework integrating Gini feature importance, SHapley Additive exPlanations (SHAP), and Local Interpretable Model-Agnostic Explanations (LIME) to deliver explainable and dependable anomaly detection.
+This repository contains the source code and link to the benchmark dataset for **UAV-XAI**, a lightweight Random Forest-based UAV network security framework integrating Gini feature importance, SHapley Additive exPlanations (SHAP), and Local Interpretable Model-Agnostic Explanations (LIME) to deliver explainable and dependable anomaly detection.
 
-More details on the methodology and experimental evaluation are available in the accompanying paper, *UAV-XAI-Forensics*.
+More details on the methodology and experimental evaluation are available in the accompanying paper, *UAV-XAI*.
 
 ---
 
