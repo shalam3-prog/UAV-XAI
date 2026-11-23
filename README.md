@@ -1,8 +1,8 @@
-# UAV-XAI
+# UAV-XAI-IDS
 
-This repository contains the source code and link to the benchmark dataset for **UAV-XAI**, a lightweight Random Forest-based UAV network security framework integrating Gini feature importance, SHapley Additive exPlanations (SHAP), and Local Interpretable Model-Agnostic Explanations (LIME) to deliver explainable and dependable anomaly detection.
+This repository contains the source code and link to the benchmark dataset for **UAV-XAI-IDS**, a lightweight Random Forest-based UAV network security framework integrating Gini feature importance, SHapley Additive exPlanations (SHAP), and Local Interpretable Model-Agnostic Explanations (LIME) to deliver explainable and dependable anomaly detection.
 
-More details on the methodology and experimental evaluation are available in the accompanying paper, *UAV-XAI*.
+More details on the methodology and experimental evaluation are available in the accompanying paper, *UAV-XAI-IDS*.
 
 ---
 
@@ -73,7 +73,7 @@ Running the pipeline populates your directory with the following metric logs, da
 *   `true_xai_comparison_unauth.pdf`
 *   `true_xai_comparison_video.pdf`
 
-### Local LIME Case Studies & Visual Explanations
+### Local LIME Case Studies & Visual Explanations (the number of files and names may differ)
 *   `lime_case_study_benign_correct_classification_id10889.pdf`
 *   `lime_case_study_benign_correct_classification_id13919.pdf`
 *   `lime_case_study_dos_correct_classification_id19474.pdf`
